@@ -397,6 +397,13 @@ def serve(cfg: Config, host: str, log=print) -> int:
     busy = threading.Lock()
     last_done = [0.0]
 
+    # Track the current scan's pages and whether post-processing is running.
+    # When the button is pressed during post-processing, we finalize the
+    # pages scanned so far instead of starting a new scan.
+    scan_pages: list[str] = []
+    scan_work: Path | None = None
+    postprocessing = threading.Event()
+
     try:
         sid = scanner_id(host)
     except OSError as exc:
@@ -404,11 +411,26 @@ def serve(cfg: Config, host: str, log=print) -> int:
         return 1
 
     def do_scan(source: str) -> None:
+        """Run one scan, from whichever path noticed the press first.
+
+        If post-processing is running, finalize the current batch instead
+        of starting a new scan. This lets you load the next stack while
+        OCR/naming runs on the previous one.
+        """
         if not busy.acquire(blocking=False):
             return
         try:
             if time.monotonic() - last_done[0] < 5.0:
                 return
+            
+            # If we're post-processing, finalize the current batch
+            if postprocessing.is_set():
+                log(f"[{stamp()}] SCAN BUTTON PRESSED via {source} (finalizing current batch)")
+                if scan_pages and scan_work:
+                    postprocessing.clear()  # Signal post-processor to finalize
+                    # The post-processor thread will handle the rest
+                return
+
             log(f"[{stamp()}] SCAN BUTTON PRESSED via {source}")
             work = Path(tempfile.mkdtemp(prefix="panelbeater-"))
             try:
@@ -418,13 +440,38 @@ def serve(cfg: Config, host: str, log=print) -> int:
                 n = 0
             if n:
                 pages = sorted(str(p) for p in work.glob("page-*.jpg"))
+                # Track for potential early finalization
+                scan_pages[:] = pages
+                scan_work = work
+                postprocessing.set()
                 threading.Thread(
-                    target=lambda: output.finish(
-                        pages, time.strftime("%Y%m%d-%H%M%S"), cfg, log=log)
+                    target=_postprocess_and_clear, args=(cfg, pages, work, log), daemon=False
                 ).start()
         finally:
             last_done[0] = time.monotonic()
             busy.release()
+
+    def _postprocess_and_clear(cfg: Config, pages: list[str], work: Path, log=print) -> None:
+        """Run post-processing and clear tracking state when done."""
+        try:
+            output.finish(pages, time.strftime("%Y%m%d-%H%M%S"), cfg, log=log)
+        except Exception as exc:  # noqa: BLE001
+            log(f"  post-processing failed: {type(exc).__name__}: {exc}")
+        finally:
+            # Clear tracking state
+            scan_pages.clear()
+            scan_work = None
+            postprocessing.clear()
+            # Cleanup temp directory
+            for p in work.glob("*"):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+            try:
+                work.rmdir()
+            except OSError:
+                pass
 
     # Button-notice listener (scanner -> host UDP 55265, VENS op 0x01).
     notify = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
