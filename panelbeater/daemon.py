@@ -87,6 +87,13 @@ def serve(cfg: Config, host: str, log=print) -> int:
     registered = [False]
     last_active = [time.monotonic()]
 
+    # Track the current scan's pages and whether post-processing is running.
+    # When the button is pressed during post-processing, we finalize the
+    # pages scanned so far instead of starting a new scan.
+    scan_pages: list[str] = []
+    scan_work: None | object = None
+    postprocessing = threading.Event()
+
     def do_scan(source: str, paper: bool | None = None) -> None:
         """Run one scan, from whichever path noticed the press first.
 

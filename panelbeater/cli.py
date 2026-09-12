@@ -35,9 +35,9 @@ def usb_present() -> bool:
 
 
 def pick_transport(cfg: Config, override: str = "") -> str:
-    """network or usb. `auto` prefers USB, which needs no enrolment."""
+    """network, usb, or ix1300. `auto` prefers USB, which needs no enrolment."""
     want = (override or cfg.get("transport", "auto")).strip().lower()
-    if want in ("network", "usb"):
+    if want in ("network", "usb", "ix1300"):
         return want
     from . import usb as usbmod
 
@@ -131,8 +131,31 @@ def cmd_enrol(args, cfg: Config) -> int:
 
 
 def cmd_scan(args, cfg: Config) -> int:
-    if pick_transport(cfg, args.transport) == "usb":
+    transport = pick_transport(cfg, args.transport)
+    if transport == "usb":
         return scan_over_usb(cfg)
+    if transport == "ix1300":
+        from . import ix1300
+        import tempfile
+        host = resolve_scanner(cfg, args.scanner)
+        work = Path(tempfile.mkdtemp(prefix="panelbeater-"))
+        try:
+            n = ix1300.scan_once(cfg, host, str(work / "page"))
+            if not n:
+                return 1
+            print(f"{n} side(s) scanned")
+            pages = sorted(str(p) for p in work.glob("page-*.jpg"))
+            final = output.finish(pages, time.strftime("%Y%m%d-%H%M%S"), cfg)
+            if final:
+                print(final)
+            return 0
+        finally:
+            for p in work.glob("*"):
+                p.unlink(missing_ok=True)
+            try:
+                work.rmdir()
+            except OSError:
+                pass
     host = resolve_scanner(cfg, args.scanner)
     work = Path(tempfile.mkdtemp(prefix="panelbeater-"))
     try:
@@ -180,11 +203,18 @@ def scan_over_usb(cfg: Config) -> int:
 
 
 def cmd_serve(args, cfg: Config) -> int:
-    if pick_transport(cfg, args.transport) == "usb":
+    transport = pick_transport(cfg, args.transport)
+    if transport == "usb":
         from .usb.daemon import serve as usb_serve
 
         print("transport: usb")
         return usb_serve(cfg)
+    if transport == "ix1300":
+        from . import ix1300
+
+        print("transport: ix1300 (network, VENS)")
+        host = resolve_scanner(cfg, args.scanner)
+        return ix1300.serve(cfg, host)
     from .daemon import serve
 
     print("transport: network")
@@ -235,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--transport",
         default="",
-        choices=["", "network", "usb"],
+        choices=["", "network", "usb", "ix1300"],
         help="override the configured transport",
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
