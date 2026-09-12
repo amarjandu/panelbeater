@@ -1,23 +1,19 @@
 # panelbeater
 
-Press the Scan button on a ScanSnap iX1500 and have the page arrive on your
-Linux machine. No vendor software, no Windows VM.
+This is a fork of panelbeater that is around the iX1300, which uses a similar
+but different communication protocol.
 
-The iX1500's touch panel is not a button — it is a client of whatever computer
-currently owns the scanner, and it only works while that computer keeps telling
-the scanner it is there. Without vendor software the panel greys out and the
-scanner becomes a plain USB device you have to drive from the keyboard. This
-implements the protocol the panel actually speaks, so the button works again.
+For the iX1300 you will need to:
+1. configure the printer to work on wifi (ios app works well)
+2. force your networks DHCP to provide it a static ip
+3. start our docker container on a machine (tested x86, but should work anywhere)
 
-```
-$ panelbeater enrol
-$ systemctl --user enable --now panelbeater
-```
 
-Then press Scan. A searchable PDF appears in `~/Documents/Scans`.
-
-Tested on an iX1500 (`04c5:159f`) over Wi-Fi. The iX1600 and iX1400 share the
-platform and will probably work — reports welcome.
+---
+> [!WARNING] 
+> Everything below came from the original fork of this repo, I don't use it at the moment as I didn't need it.
+> I needed a scanner that works with my homelab, this got me there.
+---
 
 ## What works
 
