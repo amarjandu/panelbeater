@@ -413,9 +413,10 @@ def serve(cfg: Config, host: str, log=print) -> int:
     def do_scan(source: str) -> None:
         """Run one scan, from whichever path noticed the press first.
 
-        If post-processing is running, finalize the current batch instead
-        of starting a new scan. This lets you load the next stack while
-        OCR/naming runs on the previous one.
+        If post-processing is running, ignore the press (don't start a new
+        scan). This lets you load the next stack while OCR/naming runs on
+        the previous one - the button press is simply ignored until the
+        current post-processing completes.
         """
         if not busy.acquire(blocking=False):
             return
@@ -423,12 +424,9 @@ def serve(cfg: Config, host: str, log=print) -> int:
             if time.monotonic() - last_done[0] < 5.0:
                 return
             
-            # If we're post-processing, finalize the current batch
+            # If we're post-processing, ignore this button press
             if postprocessing.is_set():
-                log(f"[{stamp()}] SCAN BUTTON PRESSED via {source} (finalizing current batch)")
-                if scan_pages and scan_work:
-                    postprocessing.clear()  # Signal post-processor to finalize
-                    # The post-processor thread will handle the rest
+                log(f"[{stamp()}] SCAN BUTTON PRESSED via {source} (ignored: post-processing in progress)")
                 return
 
             log(f"[{stamp()}] SCAN BUTTON PRESSED via {source}")
@@ -453,6 +451,7 @@ def serve(cfg: Config, host: str, log=print) -> int:
 
     def _postprocess_and_clear(cfg: Config, pages: list[str], work: Path, log=print) -> None:
         """Run post-processing and clear tracking state when done."""
+        nonlocal scan_work
         try:
             output.finish(pages, time.strftime("%Y%m%d-%H%M%S"), cfg, log=log)
         except Exception as exc:  # noqa: BLE001
